@@ -162,8 +162,8 @@ jobs:
              CONFIG_PACKAGE_luci-app-verysync is not set
           #   CONFIG_PACKAGE_luci-app-webadmin=y
              CONFIG_PACKAGE_luci-app-wireguard is not set
-          #   CONFIG_PACKAGE_luci-app-wrtbwmon=y
-          # EOF
+             CONFIG_PACKAGE_luci-app-wrtbwmon is not set
+           EOF
 
           # LuCI主题:
           # cat >> .config <<EOF
