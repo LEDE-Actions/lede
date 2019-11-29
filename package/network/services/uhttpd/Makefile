@@ -8,17 +8,18 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=uhttpd
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 PKG_SOURCE_PROTO:=git
-PKG_SOURCE_URL=$(LEDE_GIT)/project/uhttpd.git
-PKG_SOURCE_DATE:=2016-10-25
-PKG_SOURCE_VERSION:=1628fa4b34aa143187353f81e8001b9a15286bda
-PKG_MIRROR_HASH:=2ac4ba8dc0b349d72174aac9ff693a73a214295a9890fe3d2a8eedcad54d06e3
+PKG_SOURCE_URL=$(PROJECT_GIT)/project/uhttpd.git
+PKG_SOURCE_DATE:=2018-11-28
+PKG_SOURCE_VERSION:=cdfc902a4cb77bc538a729f9e1c8a8578454a0e5
+PKG_MIRROR_HASH:=6b21111547a4453355bd6c941a47f0116a652a77d87c1e05a035168b8ab2aa6f
 PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
 PKG_LICENSE:=ISC
 
 PKG_BUILD_DEPENDS = ustream-ssl
+PKG_CONFIG_DEPENDS:= CONFIG_uhttpd_lua
 
 include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/cmake.mk
@@ -43,9 +44,6 @@ define Package/uhttpd/description
 endef
 
 define Package/uhttpd/config
-  config PACKAGE_uhttpd_debug
-    bool "Build with debug messages"
-    default n
   config uhttpd_lua
     depends on PACKAGE_uhttpd-mod-lua
     bool "Enable Integrated Lua interpreter"
@@ -107,16 +105,6 @@ define Package/uhttpd-mod-ubus/install
 	$(INSTALL_DIR) $(1)/usr/lib $(1)/etc/uci-defaults
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/uhttpd_ubus.so $(1)/usr/lib/
 	$(INSTALL_DATA) ./files/ubus.default $(1)/etc/uci-defaults/00_uhttpd_ubus
-endef
-
-define Package/uhttpd-mod-lua/postinst
-	$(if $(CONFIG_uhttpd_lua),
-	#!/bin/sh
-	if [ -f $${IPKG_INSTROOT}/www/index.html ]
-	then
-		sed -e 's:/cgi-bin::g' -i $${IPKG_INSTROOT}/www/index.html
-	fi
-	,)
 endef
 
 

@@ -11,10 +11,10 @@ PKG_NAME:=procd
 PKG_RELEASE:=1
 
 PKG_SOURCE_PROTO:=git
-PKG_SOURCE_URL=$(LEDE_GIT)/project/procd.git
-PKG_SOURCE_DATE:=2017-08-22
-PKG_SOURCE_VERSION:=54b46a351fab736a92221a6f9c750b5f9da499a1
-PKG_MIRROR_HASH:=dcbeea89910bbdf7d6cf20c38892d6c51de375c8b35c372a7106ae17090694f3
+PKG_SOURCE_URL=$(PROJECT_GIT)/project/procd.git
+PKG_SOURCE_DATE:=2019-05-30
+PKG_SOURCE_VERSION:=ade00ca585a49c8478bf60eb24ce385676be37a4
+PKG_MIRROR_HASH:=1417727ae6fcda01017e1bec3ec66e3e78116f9343cfe0256e40af54c52f2acc
 CMAKE_INSTALL:=1
 
 PKG_LICENSE:=GPL-2.0
@@ -37,11 +37,15 @@ endif
 CMAKE_OPTIONS += -DEARLY_PATH="$(TARGET_INIT_PATH)"
 TARGET_LDFLAGS += $(if $(CONFIG_USE_GLIBC),-lrt)
 
+TARGET_CFLAGS += -flto
+TARGET_LDFLAGS += -flto
+
 define Package/procd
   SECTION:=base
   CATEGORY:=Base system
   DEPENDS:=+ubusd +ubus +libjson-script +ubox +USE_GLIBC:librt +libubox +libubus
   TITLE:=OpenWrt system process manager
+  USERID:=:dialout=20 :audio=29
 endef
 
 define Package/procd-ujail
@@ -54,7 +58,7 @@ endef
 define Package/procd-seccomp
   SECTION:=base
   CATEGORY:=Base system
-  DEPENDS:=@arm||@armeb||@mips||@mipsel||@i386||@x86_64 @!TARGET_uml @KERNEL_SECCOMP +libubox +libblobmsg-json
+  DEPENDS:=@arm||@armeb||@mips||@mipsel||@i386||@powerpc||@x86_64 @!TARGET_uml @KERNEL_SECCOMP +libubox +libblobmsg-json
   TITLE:=OpenWrt process seccomp helper + utrace
 endef
 
@@ -87,9 +91,8 @@ ifdef CONFIG_PACKAGE_procd-ujail
   CMAKE_OPTIONS += -DJAIL_SUPPORT=1
 endif
 
-ifdef CONFIG_PACKAGE_procd-seccomp
-  CMAKE_OPTIONS += -DSECCOMP_SUPPORT=1 -DUTRACE_SUPPORT=1
-endif
+SECCOMP=$(if $(CONFIG_PACKAGE_procd-seccomp),1,0)
+CMAKE_OPTIONS += -DSECCOMP_SUPPORT=$(SECCOMP) -DUTRACE_SUPPORT=$(SECCOMP)
 
 define Package/procd/install
 	$(INSTALL_DIR) $(1)/sbin $(1)/etc $(1)/lib/functions
@@ -97,7 +100,7 @@ define Package/procd/install
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/sbin/{init,procd,askfirst,udevtrigger,upgraded} $(1)/sbin/
 	$(INSTALL_DATA) $(PKG_INSTALL_DIR)/usr/lib/libsetlbf.so $(1)/lib
 	$(INSTALL_BIN) ./files/reload_config $(1)/sbin/
-	$(INSTALL_DATA) ./files/hotplug*.json $(1)/etc/
+	$(INSTALL_CONF) ./files/hotplug*.json $(1)/etc/
 	$(INSTALL_DATA) ./files/procd.sh $(1)/lib/functions/
 endef
 
@@ -110,6 +113,7 @@ define Package/procd-seccomp/install
 	$(INSTALL_DIR) $(1)/sbin $(1)/lib
 	$(INSTALL_DATA) $(PKG_INSTALL_DIR)/usr/lib/libpreload-seccomp.so $(1)/lib
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/sbin/utrace $(1)/sbin/
+	$(LN) utrace $(1)/sbin/seccomp-trace
 	$(INSTALL_DATA) $(PKG_INSTALL_DIR)/usr/lib/libpreload-trace.so $(1)/lib
 endef
 

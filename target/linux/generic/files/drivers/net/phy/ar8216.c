@@ -49,12 +49,6 @@ extern const struct ar8xxx_chip ar8337_chip;
 		.name = (_n),	\
 	}
 
-#define AR8216_MIB_RXB_ID	14	/* RxGoodByte */
-#define AR8216_MIB_TXB_ID	29	/* TxByte */
-
-#define AR8236_MIB_RXB_ID	15	/* RxGoodByte */
-#define AR8236_MIB_TXB_ID	31	/* TxByte */
-
 static const struct ar8xxx_mib_desc ar8216_mibs[] = {
 	MIB_DESC(1, AR8216_STATS_RXBROAD, "RxBroad"),
 	MIB_DESC(1, AR8216_STATS_RXPAUSE, "RxPause"),
@@ -301,6 +295,17 @@ ar8xxx_rmw(struct ar8xxx_priv *priv, int reg, u32 mask, u32 val)
 
 	return ret;
 }
+void
+ar8xxx_phy_dbg_read(struct ar8xxx_priv *priv, int phy_addr,
+           u16 dbg_addr, u16 *dbg_data)
+{
+       struct mii_bus *bus = priv->mii_bus;
+
+       mutex_lock(&bus->mdio_lock);
+       bus->write(bus, phy_addr, MII_ATH_DBG_ADDR, dbg_addr);
+       *dbg_data = bus->read(bus, phy_addr, MII_ATH_DBG_DATA);
+       mutex_unlock(&bus->mdio_lock);
+}
 
 void
 ar8xxx_phy_dbg_write(struct ar8xxx_priv *priv, int phy_addr,
@@ -361,6 +366,7 @@ ar8xxx_reg_wait(struct ar8xxx_priv *priv, u32 reg, u32 mask, u32 val,
 			return 0;
 
 		usleep_range(1000, 2000);
+		cond_resched();
 	}
 
 	return -ETIMEDOUT;
@@ -432,6 +438,7 @@ ar8xxx_mib_fetch_port_stat(struct ar8xxx_priv *priv, int port, bool flush)
 			mib_stats[i] = 0;
 		else
 			mib_stats[i] += t;
+		cond_resched();
 	}
 }
 
@@ -571,6 +578,7 @@ ar8216_wait_bit(struct ar8xxx_priv *priv, int reg, u32 mask, u32 val)
 			break;
 
 		udelay(10);
+		cond_resched();
 	}
 
 	pr_err("ar8216: timeout on reg %08x: %08x & %08x != %08x\n",
@@ -736,8 +744,10 @@ ar8216_wait_atu_ready(struct ar8xxx_priv *priv, u16 r2, u16 r1)
 {
 	int timeout = 20;
 
-	while (ar8xxx_mii_read32(priv, r2, r1) & AR8216_ATU_ACTIVE && --timeout)
-                udelay(10);
+	while (ar8xxx_mii_read32(priv, r2, r1) & AR8216_ATU_ACTIVE && --timeout) {
+		udelay(10);
+		cond_resched();
+	}
 
 	if (!timeout)
 		pr_err("ar8216: timeout waiting for atu to become ready\n");
@@ -750,7 +760,6 @@ static void ar8216_get_arl_entry(struct ar8xxx_priv *priv,
 	u16 r2, page;
 	u16 r1_func0, r1_func1, r1_func2;
 	u32 t, val0, val1, val2;
-	int i;
 
 	split_addr(AR8216_REG_ATU_FUNC0, &r1_func0, &r2, &page);
 	r2 |= 0x10;
@@ -786,12 +795,7 @@ static void ar8216_get_arl_entry(struct ar8xxx_priv *priv,
 		if (!*status)
 			break;
 
-		i = 0;
-		t = AR8216_ATU_PORT0;
-		while (!(val2 & t) && ++i < priv->dev.ports)
-			t <<= 1;
-
-		a->port = i;
+		a->portmap = (val2 & AR8216_ATU_PORTS) >> AR8216_ATU_PORTS_S;
 		a->mac[0] = (val0 & AR8216_ATU_ADDR5) >> AR8216_ATU_ADDR5_S;
 		a->mac[1] = (val0 & AR8216_ATU_ADDR4) >> AR8216_ATU_ADDR4_S;
 		a->mac[2] = (val1 & AR8216_ATU_ADDR3) >> AR8216_ATU_ADDR3_S;
@@ -1517,8 +1521,12 @@ ar8xxx_sw_get_arl_table(struct switch_dev *dev,
 		 */
 		for (j = 0; j < i; ++j) {
 			a1 = &priv->arl_table[j];
-			if (a->port == a1->port && !memcmp(a->mac, a1->mac, sizeof(a->mac)))
-				goto duplicate;
+			if (!memcmp(a->mac, a1->mac, sizeof(a->mac))) {
+				/* ignore ports already seen in former entry */
+				a->portmap &= ~a1->portmap;
+				if (!a->portmap)
+					goto duplicate;
+			}
 		}
 	}
 
@@ -1535,7 +1543,7 @@ ar8xxx_sw_get_arl_table(struct switch_dev *dev,
 	for (j = 0; j < priv->dev.ports; ++j) {
 		for (k = 0; k < i; ++k) {
 			a = &priv->arl_table[k];
-			if (a->port != j)
+			if (!(a->portmap & BIT(j)))
 				continue;
 			len += snprintf(buf + len, sizeof(priv->arl_buf) - len,
 					"Port %d: MAC %02x:%02x:%02x:%02x:%02x:%02x\n",
@@ -1584,56 +1592,6 @@ ar8xxx_sw_set_flush_port_arl_table(struct switch_dev *dev,
 	ret = priv->chip->atu_flush_port(priv, port);
 	mutex_unlock(&priv->reg_mutex);
 
-	return ret;
-}
-
-int
-ar8xxx_sw_get_port_stats(struct switch_dev *dev, int port,
-			struct switch_port_stats *stats)
-{
-	struct ar8xxx_priv *priv = swdev_to_ar8xxx(dev);
-	u64 *mib_stats;
-	int ret;
-	int mib_txb_id, mib_rxb_id;
-
-	if (!ar8xxx_has_mib_counters(priv))
-		return -EOPNOTSUPP;
-
-	if (port >= dev->ports)
-		return -EINVAL;
-
-	switch (priv->chip_ver) {
-		case AR8XXX_VER_AR8216:
-			mib_txb_id = AR8216_MIB_TXB_ID;
-			mib_rxb_id = AR8216_MIB_RXB_ID;
-			break;
-		case AR8XXX_VER_AR8236:
-		case AR8XXX_VER_AR8316:
-		case AR8XXX_VER_AR8327:
-		case AR8XXX_VER_AR8337:
-			mib_txb_id = AR8236_MIB_TXB_ID;
-			mib_rxb_id = AR8236_MIB_RXB_ID;
-			break;
-		default:
-			return -EOPNOTSUPP;
-	}
-
-	mutex_lock(&priv->mib_lock);
-	ret = ar8xxx_mib_capture(priv);
-	if (ret)
-		goto unlock;
-
-	ar8xxx_mib_fetch_port_stat(priv, port, false);
-
-	mib_stats = &priv->mib_stats[port * priv->chip->num_mibs];
-
-	stats->tx_bytes = mib_stats[mib_txb_id];
-	stats->rx_bytes = mib_stats[mib_rxb_id];
-
-	ret = 0;
-
-unlock:
-	mutex_unlock(&priv->mib_lock);
 	return ret;
 }
 
@@ -1752,7 +1710,16 @@ static const struct switch_dev_ops ar8xxx_sw_ops = {
 	.apply_config = ar8xxx_sw_hw_apply,
 	.reset_switch = ar8xxx_sw_reset_switch,
 	.get_port_link = ar8xxx_sw_get_port_link,
+/* The following op is disabled as it hogs the CPU and degrades performance.
+   An implementation has been attempted in 4d8a66d but reading MIB data is slow
+   on ar8xxx switches.
+
+   The high CPU load has been traced down to the ar8xxx_reg_wait() call in
+   ar8xxx_mib_op(), which has to usleep_range() till the MIB busy flag set by
+   the request to update the MIB counter is cleared. */
+#if 0
 	.get_port_stats = ar8xxx_sw_get_port_stats,
+#endif
 };
 
 static const struct ar8xxx_chip ar8216_chip = {
@@ -2146,7 +2113,8 @@ ar8xxx_phy_read_status(struct phy_device *phydev)
 
 	phydev->state = PHY_RUNNING;
 	netif_carrier_on(phydev->attached_dev);
-	phydev->adjust_link(phydev->attached_dev);
+	if (phydev->adjust_link)
+		phydev->adjust_link(phydev->attached_dev);
 
 	return 0;
 }
@@ -2209,7 +2177,7 @@ ar8xxx_phy_probe(struct phy_device *phydev)
 	int ret;
 
 	/* skip PHYs at unused adresses */
-	if (phydev->mdio.addr != 0 && phydev->mdio.addr != 4)
+	if (phydev->mdio.addr != 0 && phydev->mdio.addr != 3 && phydev->mdio.addr != 4)
 		return -ENODEV;
 
 	if (!ar8xxx_is_possible(phydev->mdio.bus))
@@ -2268,6 +2236,8 @@ found:
 			phydev->supported |= SUPPORTED_1000baseT_Full;
 			phydev->advertising |= ADVERTISED_1000baseT_Full;
 		}
+		if (priv->chip->phy_rgmii_set)
+			priv->chip->phy_rgmii_set(priv, phydev);
 	}
 
 	phydev->priv = priv;

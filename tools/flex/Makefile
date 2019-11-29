@@ -7,6 +7,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=flex
+PKG_CPE_ID:=cpe:/a:flex_project:flex
 PKG_VERSION:=2.6.4
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
@@ -19,6 +20,11 @@ HOST_BUILD_PARALLEL:=1
 include $(INCLUDE_DIR)/host-build.mk
 
 HOST_CONFIGURE_ARGS += --disable-shared
+
+define Host/Install
+	$(call Host/Install/Default)
+	$(LN) flex $(STAGING_DIR_HOST)/bin/lex
+endef
 
 define Host/Clean
 	-$(MAKE) -C $(HOST_BUILD_DIR) uninstall

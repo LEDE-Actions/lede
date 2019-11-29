@@ -20,7 +20,7 @@ ath9k_eeprom_extract() {
 	[ -n "$mtd" ] || \
 		ath9k_eeprom_die "no mtd device found for partition $part"
 
-	dd if=$mtd of=/lib/firmware/$FIRMWARE bs=1 skip=$offset count=$count 2>/dev/null || \
+	dd if=$mtd of=/lib/firmware/$FIRMWARE iflag=skip_bytes bs=$count skip=$offset count=1 2>/dev/null || \
 		ath9k_eeprom_die "failed to extract from $mtd"
 }
 
@@ -35,7 +35,7 @@ ath9k_ubi_eeprom_extract() {
 	[ -n "$ubi" ] || \
 		ath9k_eeprom_die "no UBI volume found for $part"
 
-	dd if=/dev/$ubi of=/lib/firmware/$FIRMWARE bs=1 skip=$offset count=$count 2>/dev/null || \
+	dd if=/dev/$ubi of=/lib/firmware/$FIRMWARE iflag=skip_bytes bs=$count skip=$offset count=1 2>/dev/null || \
 		ath9k_eeprom_die "failed to extract from $ubi"
 }
 
@@ -52,7 +52,7 @@ board=$(board_name)
 case "$FIRMWARE" in
 "pci_wmac0.eeprom")
 	case $board in
-	wndr4700)
+	netgear,wndr4700)
 		. /lib/upgrade/nand.sh
 
 		if [ -n "$(nand_find_volume ubi0 caldata)" ]; then
@@ -70,7 +70,7 @@ case "$FIRMWARE" in
 
 "pci_wmac1.eeprom")
 	case $board in
-	wndr4700)
+	netgear,wndr4700)
 		. /lib/upgrade/nand.sh
 
 		if [ -n "$(nand_find_volume ubi0 caldata)" ]; then

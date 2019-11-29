@@ -8,9 +8,11 @@
 define KernelPackage/ppfe
   SUBMENU:=$(NETWORK_DEVICES_MENU)
   TITLE:=Freescale PPFE Driver support
-  KCONFIG:=CONFIG_FSL_PPFE
+  DEPENDS:=@TARGET_layerscape
+  KCONFIG:=CONFIG_FSL_PPFE=y \
+  	CONFIG_FSL_PPFE_UTIL_DISABLED=y
   FILES:=$(LINUX_DIR)/drivers/staging/fsl_ppfe/pfe.ko
-  AUTOLOAD:=$(call AutoLoad,35,ppfe)
+  AUTOLOAD:=$(call AutoLoad,35,pfe)
 endef
 
 define KernelPackage/ppfe/description
